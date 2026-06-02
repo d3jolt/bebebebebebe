@@ -1,1 +1,692 @@
-print hello niger
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>DOOM-LIKE RAYCASTER | Классический шутер от первого лица</title>
+    <style>
+        * {
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(145deg, #0a0f1e 0%, #0c1222 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', 'Fira Code', monospace;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 20px;
+            border-radius: 32px;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(2px);
+            box-shadow: 0 20px 35px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 20px;
+            box-shadow: 0 12px 28px black;
+            cursor: crosshair;
+            border: 3px solid #7a2e2e;
+        }
+        .info-panel {
+            background: #1e1a1ad9;
+            backdrop-filter: blur(8px);
+            border-radius: 60px;
+            padding: 8px 24px;
+            display: flex;
+            gap: 40px;
+            font-weight: bold;
+            text-shadow: 0 2px 0 #00000066;
+            border: 1px solid #a55;
+            color: #f3cba5;
+        }
+        .health-bar-bg {
+            width: 180px;
+            height: 16px;
+            background: #2e1e1e;
+            border-radius: 40px;
+            overflow: hidden;
+            border: 1px solid #b66;
+        }
+        .health-fill {
+            width: 100%;
+            height: 100%;
+            background: #e34d4d;
+            transition: width 0.1s linear;
+            box-shadow: 0 0 4px #ff7777;
+        }
+        .stats {
+            display: flex;
+            gap: 28px;
+            align-items: center;
+            font-size: 22px;
+            letter-spacing: 1px;
+        }
+        .stats span {
+            color: #ffbb77;
+            font-weight: 900;
+            background: #00000088;
+            padding: 4px 12px;
+            border-radius: 32px;
+        }
+        button {
+            background: #7a2e2e;
+            border: none;
+            color: #ffd7a0;
+            font-family: monospace;
+            font-weight: bold;
+            padding: 6px 18px;
+            border-radius: 60px;
+            cursor: pointer;
+            transition: 0.1s linear;
+            font-size: 18px;
+            box-shadow: 0 4px 0 #3e1515;
+        }
+        button:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 #3e1515;
+        }
+        .controls {
+            font-size: 14px;
+            background: #000000aa;
+            border-radius: 60px;
+            padding: 5px 18px;
+            color: #cdab7a;
+        }
+        .controls kbd {
+            background: #2c2c2c;
+            padding: 2px 8px;
+            border-radius: 30px;
+            font-weight: bold;
+            color: #ffcc88;
+            margin: 0 3px;
+        }
+        @keyframes hitFlash {
+            0% { box-shadow: 0 0 0 0 red; opacity: 1; }
+            100% { box-shadow: 0 0 0 25px rgba(255,0,0,0); opacity: 0; }
+        }
+        .flash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(circle, rgba(255,70,70,0.5) 0%, rgba(255,0,0,0) 80%);
+            animation: hitFlash 0.15s ease-out forwards;
+            z-index: 999;
+        }
+        .game-over {
+            position: fixed;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #110000ee;
+            backdrop-filter: blur(12px);
+            padding: 24px 48px;
+            border-radius: 64px;
+            text-align: center;
+            border: 2px solid #c44;
+            color: #fcc;
+            font-family: monospace;
+            font-size: 28px;
+            font-weight: bold;
+            z-index: 1000;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<div>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="800" height="450"></canvas>
+        <div class="info-panel">
+            <div class="stats">
+                ❤️ ЗДОРОВЬЕ
+                <div class="health-bar-bg">
+                    <div id="healthFill" class="health-fill" style="width: 100%"></div>
+                </div>
+                <span>💀 <span id="scoreValue">0</span></span>
+            </div>
+            <button id="restartBtn">⚡ ПЕРЕЗАГРУЗИТЬ ⚡</button>
+        </div>
+        <div class="controls">
+            🎮 <kbd>↑</kbd> <kbd>↓</kbd> — ВПЕРЁД/НАЗАД &nbsp;&nbsp;|&nbsp;&nbsp;
+            <kbd>←</kbd> <kbd>→</kbd> — ПОВОРОТ &nbsp;&nbsp;|&nbsp;&nbsp;
+            <kbd>SPACE</kbd> или <kbd>CTRL</kbd> — СТРЕЛЬБА 🔫
+        </div>
+    </div>
+</div>
+
+<script>
+    (function(){
+        // ---------- КОНФИГУРАЦИЯ ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width = 800;
+        const height = canvas.height = 450;
+        
+        // Карта (8x8 классическая, стены 1)
+        const MAP = [
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,0,1,0,0,0,1,0,0,1],
+            [1,0,0,0,0,0,1,0,0,0,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,1],
+            [1,0,0,0,1,0,0,0,0,0,1,1],
+            [1,0,0,0,0,0,1,0,0,0,0,1],
+            [1,0,0,1,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+        const MAP_W = MAP[0].length;
+        const MAP_H = MAP.length;
+        const TILE_SIZE = 1.0; // условная единица
+        
+        // Игрок
+        let player = {
+            x: 2.5,
+            y: 2.5,
+            angle: 0.0,   // радианы
+            health: 100,
+            maxHealth: 100,
+            score: 0
+        };
+        
+        // Враги (классические импы)
+        let enemies = [
+            { x: 5.2, y: 4.2, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 8.3, y: 3.8, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 3.2, y: 7.5, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 7.7, y: 7.2, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 9.8, y: 9.1, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 4.5, y: 9.8, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 2.2, y: 9.2, alive: true, radius: 0.32, attackCd: 0 },
+            { x: 6.2, y: 2.0, alive: true, radius: 0.32, attackCd: 0 }
+        ];
+        
+        // Технические переменные
+        let keys = {
+            ArrowUp: false, ArrowDown: false,
+            ArrowLeft: false, ArrowRight: false
+        };
+        let lastTimestamp = 0;
+        let shootCooldown = 0;
+        let invincibilityTimer = 0;
+        let gameActive = true;
+        let hitFlashRequest = false;
+        
+        // эффект выстрела
+        let muzzleFlash = 0;
+        
+        // получение урона с инвульнерабельностью
+        function damagePlayer(amount) {
+            if(!gameActive) return;
+            if(invincibilityTimer > 0) return;
+            player.health = Math.max(0, player.health - amount);
+            invincibilityTimer = 0.35; // секунд неуязвимости
+            if(player.health <= 0) {
+                gameActive = false;
+                player.health = 0;
+            }
+            updateHealthUI();
+        }
+        
+        // Хелперы коллизий
+        function isWallCollision(px, py) {
+            let mapX = Math.floor(px);
+            let mapY = Math.floor(py);
+            if(mapX < 0 || mapY < 0 || mapX >= MAP_W || mapY >= MAP_H) return true;
+            return MAP[mapY][mapX] === 1;
+        }
+        
+        // Движение с разделением на оси (скольжение)
+        function tryMove(dx, dy) {
+            let newX = player.x + dx;
+            let newY = player.y + dy;
+            let canMoveX = true, canMoveY = true;
+            if(isWallCollision(newX, player.y)) canMoveX = false;
+            if(isWallCollision(player.x, newY)) canMoveY = false;
+            if(canMoveX) player.x = newX;
+            if(canMoveY) player.y = newY;
+            // ограничение границами карты
+            player.x = Math.min(Math.max(player.x, 0.2), MAP_W - 0.2);
+            player.y = Math.min(Math.max(player.y, 0.2), MAP_H - 0.2);
+        }
+        
+        // Проверка линии видимости (без стен) — честный алгоритм DDA
+        function hasLineOfSight(x1, y1, x2, y2) {
+            let dx = x2 - x1;
+            let dy = y2 - y1;
+            let steps = Math.max(Math.abs(dx), Math.abs(dy)) * 8;
+            if(steps < 1) steps = 1;
+            for(let step = 0; step <= steps; step++) {
+                let t = step / steps;
+                let cx = x1 + dx * t;
+                let cy = y1 + dy * t;
+                let mx = Math.floor(cx);
+                let my = Math.floor(cy);
+                if(mx < 0 || my < 0 || mx >= MAP_W || my >= MAP_H) return false;
+                if(MAP[my][mx] === 1) {
+                    // если точка рядом с врагом или игроком — пропускаем
+                    let distToPlayer = Math.hypot(cx - x1, cy - y1);
+                    let distToEnemy = Math.hypot(cx - x2, cy - y2);
+                    if(distToPlayer > 0.25 && distToEnemy > 0.25) return false;
+                }
+            }
+            return true;
+        }
+        
+        // СТРЕЛЬБА: поиск врага в прицеле + видимость
+        function shoot() {
+            if(!gameActive) return false;
+            if(shootCooldown > 0) return false;
+            shootCooldown = 0.2;  // 200 мс перезарядка
+            muzzleFlash = 0.08;   // визуальный эффект
+            
+            let closestDist = 3.5;    // дальность выстрела
+            let hitEnemy = null;
+            const playerAngle = player.angle;
+            const px = player.x, py = player.y;
+            
+            for(let i=0; i<enemies.length; i++) {
+                const e = enemies[i];
+                if(!e.alive) continue;
+                const dx = e.x - px;
+                const dy = e.y - py;
+                const dist = Math.hypot(dx, dy);
+                if(dist > 4.5) continue; // дальше не достать
+                const angleToEnemy = Math.atan2(dy, dx);
+                let angleDiff = angleToEnemy - playerAngle;
+                while(angleDiff > Math.PI) angleDiff -= Math.PI*2;
+                while(angleDiff < -Math.PI) angleDiff += Math.PI*2;
+                const aimFov = 0.22; // ~12.6 градусов прицел
+                if(Math.abs(angleDiff) < aimFov && dist < closestDist) {
+                    if(hasLineOfSight(px, py, e.x, e.y)) {
+                        closestDist = dist;
+                        hitEnemy = e;
+                    }
+                }
+            }
+            
+            if(hitEnemy) {
+                hitEnemy.alive = false;
+                player.score += 100;
+                updateScoreUI();
+                return true;
+            }
+            return false;
+        }
+        
+        // Обновление врагов (атака при контакте)
+        function updateEnemies(deltaTime) {
+            const ATTACK_DAMAGE = 14;
+            const ATTACK_COOLDOWN_MAX = 0.75; // сек между атаками
+            for(let e of enemies) {
+                if(!e.alive) continue;
+                if(e.attackCd > 0) e.attackCd -= deltaTime;
+                const distToPlayer = Math.hypot(player.x - e.x, player.y - e.y);
+                if(distToPlayer < 0.65 && e.attackCd <= 0 && gameActive) {
+                    damagePlayer(ATTACK_DAMAGE);
+                    e.attackCd = ATTACK_COOLDOWN_MAX;
+                    // небольшая отдача игрока (отброс назад)
+                    const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
+                    const knock = 0.18;
+                    tryMove(-Math.cos(angleToEnemy) * knock, -Math.sin(angleToEnemy) * knock);
+                }
+            }
+        }
+        
+        // ----- RAYCASTING (классика) -----
+        const FOV = Math.PI / 2.8;   // ~64 градуса
+        const HALF_FOV = FOV / 2;
+        const NUM_RAYS = width;
+        const DISTANCE_MAX = 12.0;
+        
+        function renderWalls() {
+            const rayAngleStep = FOV / NUM_RAYS;
+            let startAngle = player.angle - HALF_FOV;
+            
+            for(let i = 0; i < NUM_RAYS; i++) {
+                let rayAngle = startAngle + i * rayAngleStep;
+                let sin = Math.sin(rayAngle);
+                let cos = Math.cos(rayAngle);
+                let rayX = player.x, rayY = player.y;
+                let distToWall = 0;
+                let hitWall = false;
+                let side = 0; // 0:NS, 1:EW
+                let hitX = 0, hitY = 0;
+                
+                while(!hitWall && distToWall < DISTANCE_MAX) {
+                    distToWall += 0.025;
+                    rayX = player.x + cos * distToWall;
+                    rayY = player.y + sin * distToWall;
+                    let mapX = Math.floor(rayX);
+                    let mapY = Math.floor(rayY);
+                    if(mapX < 0 || mapY < 0 || mapX >= MAP_W || mapY >= MAP_H) {
+                        hitWall = true;
+                        distToWall = DISTANCE_MAX;
+                        break;
+                    }
+                    if(MAP[mapY][mapX] === 1) {
+                        hitWall = true;
+                        // определяем сторону для оттенка
+                        let rx = rayX - mapX;
+                        let ry = rayY - mapY;
+                        if(Math.abs(rx - 0.5) > Math.abs(ry - 0.5)) side = 0;
+                        else side = 1;
+                        hitX = rx; hitY = ry;
+                    }
+                }
+                
+                // коррекция fish-eye
+                let correctedDist = distToWall * Math.cos(rayAngle - player.angle);
+                let wallHeight = (TILE_SIZE / (correctedDist + 0.0001)) * (height * 0.85);
+                wallHeight = Math.min(height, wallHeight);
+                let wallTop = (height / 2) - wallHeight / 2;
+                let wallBottom = wallTop + wallHeight;
+                if(wallTop < 0) wallTop = 0;
+                if(wallBottom > height) wallBottom = height;
+                
+                // цвет стены в зависимости от стороны и расстояния
+                let brightness = 1.0 - Math.min(0.8, correctedDist / DISTANCE_MAX);
+                let r,g,b;
+                if(side === 0) { // север/юг
+                    r = 120 + 60 * brightness;
+                    g = 70 + 40 * brightness;
+                    b = 55 + 30 * brightness;
+                } else {
+                    r = 160 + 50 * brightness;
+                    g = 90 + 30 * brightness;
+                    b = 65 + 20 * brightness;
+                }
+                // дополнительные вариации
+                let shade = 0.85 + brightness * 0.4;
+                ctx.fillStyle = `rgb(${Math.floor(r*shade)}, ${Math.floor(g*shade)}, ${Math.floor(b*shade)})`;
+                ctx.fillRect(i, wallTop, 1, wallBottom - wallTop);
+                
+                // эффект затенения углов
+                if(correctedDist > 3.5) {
+                    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.55, (correctedDist-2.5)/8)})`;
+                    ctx.fillRect(i, wallTop, 1, wallBottom - wallTop);
+                }
+            }
+        }
+        
+        // отрисовка пола и потолка
+        function renderFloorCeil() {
+            const gradCeil = ctx.createLinearGradient(0,0,0,height/2);
+            gradCeil.addColorStop(0, "#241c1c");
+            gradCeil.addColorStop(1, "#3a2a2a");
+            ctx.fillStyle = gradCeil;
+            ctx.fillRect(0,0,width,height/2);
+            const gradFloor = ctx.createLinearGradient(0,height/2,0,height);
+            gradFloor.addColorStop(0,"#2a2418");
+            gradFloor.addColorStop(1,"#1f1a10");
+            ctx.fillStyle = gradFloor;
+            ctx.fillRect(0,height/2,width,height/2);
+        }
+        
+        // отрисовка спрайтов врагов (с проверкой видимости)
+        function renderSprites() {
+            const visibleEnemies = [];
+            const px = player.x, py = player.y;
+            for(let i=0; i<enemies.length; i++) {
+                const e = enemies[i];
+                if(!e.alive) continue;
+                const dx = e.x - px;
+                const dy = e.y - py;
+                const dist = Math.hypot(dx, dy);
+                if(dist > 7.5) continue;
+                let angleTo = Math.atan2(dy, dx);
+                let angleDiff = angleTo - player.angle;
+                while(angleDiff > Math.PI) angleDiff -= Math.PI*2;
+                while(angleDiff < -Math.PI) angleDiff += Math.PI*2;
+                if(Math.abs(angleDiff) < HALF_FOV + 0.25) {
+                    if(hasLineOfSight(px, py, e.x, e.y)) {
+                        visibleEnemies.push({e, dist, angleDiff});
+                    }
+                }
+            }
+            // сортировка от дальних к ближним (чтобы ближние перекрывали)
+            visibleEnemies.sort((a,b) => b.dist - a.dist);
+            
+            for(const obj of visibleEnemies) {
+                const e = obj.e;
+                const dist = obj.dist;
+                const angleDiff = obj.angleDiff;
+                // позиция на экране
+                let screenX = (angleDiff / HALF_FOV) * (width/2) + (width/2);
+                if(screenX < 0 || screenX > width) continue;
+                const spriteSize = Math.min(120, Math.max(30, (height * 0.9) / (dist + 0.15)));
+                const spriteWidth = spriteSize * 0.85;
+                const spriteHeight = spriteSize;
+                let spriteTop = (height/2) - (spriteHeight/2);
+                let spriteLeft = screenX - (spriteWidth/2);
+                
+                // тень для объёма
+                ctx.shadowBlur = 0;
+                ctx.shadowColor = "black";
+                // сам спрайт — демонический красный шейп
+                ctx.save();
+                ctx.beginPath();
+                ctx.ellipse(screenX, spriteTop + spriteHeight*0.5, spriteWidth*0.55, spriteHeight*0.45, 0, 0, Math.PI*2);
+                ctx.fillStyle = "#aa2222";
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(screenX, spriteTop + spriteHeight*0.35, spriteWidth*0.35, spriteHeight*0.3, 0, 0, Math.PI*2);
+                ctx.fillStyle = "#cc4422";
+                ctx.fill();
+                // глаза
+                ctx.fillStyle = "#ffeedd";
+                ctx.beginPath();
+                ctx.arc(screenX - spriteWidth*0.2, spriteTop + spriteHeight*0.32, spriteWidth*0.1, 0, Math.PI*2);
+                ctx.arc(screenX + spriteWidth*0.2, spriteTop + spriteHeight*0.32, spriteWidth*0.1, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = "#000";
+                ctx.beginPath();
+                ctx.arc(screenX - spriteWidth*0.2, spriteTop + spriteHeight*0.32, spriteWidth*0.05, 0, Math.PI*2);
+                ctx.arc(screenX + spriteWidth*0.2, spriteTop + spriteHeight*0.32, spriteWidth*0.05, 0, Math.PI*2);
+                ctx.fill();
+                // рога
+                ctx.beginPath();
+                ctx.moveTo(screenX - spriteWidth*0.28, spriteTop + spriteHeight*0.22);
+                ctx.lineTo(screenX - spriteWidth*0.45, spriteTop + spriteHeight*0.05);
+                ctx.lineTo(screenX - spriteWidth*0.25, spriteTop + spriteHeight*0.15);
+                ctx.fillStyle = "#4a2a2a";
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(screenX + spriteWidth*0.28, spriteTop + spriteHeight*0.22);
+                ctx.lineTo(screenX + spriteWidth*0.45, spriteTop + spriteHeight*0.05);
+                ctx.lineTo(screenX + spriteWidth*0.25, spriteTop + spriteHeight*0.15);
+                ctx.fill();
+                ctx.restore();
+                
+                // индикатор HP врагов (демо-стиль) — не обязательно но атмосферно
+                if(dist < 3.5) {
+                    ctx.fillStyle = "#ff8844aa";
+                    ctx.font = "bold 14monospace";
+                    ctx.shadowBlur = 0;
+                    ctx.fillText("💀", screenX-8, spriteTop-5);
+                }
+            }
+        }
+        
+        // интерфейс + оружие
+        function renderHUD() {
+            ctx.font = "bold 22px 'Courier New'";
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "#ffcc88";
+            ctx.shadowColor = "#220000";
+            // оружие по центру внизу
+            if(muzzleFlash > 0) {
+                ctx.fillStyle = "#ffaa66cc";
+                ctx.fillRect(width-130, height-80, 100, 70);
+                ctx.fillStyle = "orange";
+                ctx.font = "bold 34 monospace";
+                ctx.fillText("⟁⟁", width-115, height-25);
+            } else {
+                ctx.fillStyle = "#aa8866cc";
+                ctx.fillRect(width-120, height-75, 95, 65);
+                ctx.fillStyle = "#ebc28e";
+                ctx.font = "28px monospace";
+                ctx.fillText("🔫", width-105, height-20);
+            }
+            ctx.fillStyle = "#f7d9a0";
+            ctx.font = "bold 16 monospace";
+            ctx.fillText(`HP: ${player.health}`, 18, 40);
+            ctx.fillStyle = "#eebb77";
+            ctx.fillText(`KILLS: ${player.score/100}`, 18, 75);
+            if(!gameActive) {
+                ctx.font = "900 44monospace";
+                ctx.fillStyle = "#dd3333cc";
+                ctx.shadowBlur = 8;
+                ctx.fillText("GAME OVER", width/2-110, height/2-40);
+                ctx.font = "18 monospace";
+                ctx.fillStyle = "#ffccaa";
+                ctx.fillText("Нажми R или кнопку перезапуска", width/2-140, height/2+30);
+            }
+        }
+        
+        // Обновление UI здоровья и счета
+        function updateHealthUI() {
+            const percent = (player.health / player.maxHealth) * 100;
+            document.getElementById('healthFill').style.width = `${Math.max(0,percent)}%`;
+            if(player.health < 30) document.getElementById('healthFill').style.backgroundColor = "#c33";
+            else document.getElementById('healthFill').style.backgroundColor = "#e34d4d";
+        }
+        function updateScoreUI() {
+            document.getElementById('scoreValue').innerText = player.score;
+        }
+        
+        // Перезапуск игры
+        function restartGame() {
+            player = {
+                x: 2.5, y: 2.5, angle: 0.0,
+                health: 100, maxHealth: 100, score: 0
+            };
+            enemies = [
+                { x: 5.2, y: 4.2, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 8.3, y: 3.8, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 3.2, y: 7.5, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 7.7, y: 7.2, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 9.8, y: 9.1, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 4.5, y: 9.8, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 2.2, y: 9.2, alive: true, radius: 0.32, attackCd: 0 },
+                { x: 6.2, y: 2.0, alive: true, radius: 0.32, attackCd: 0 }
+            ];
+            gameActive = true;
+            shootCooldown = 0;
+            invincibilityTimer = 0;
+            muzzleFlash = 0;
+            updateHealthUI();
+            updateScoreUI();
+        }
+        
+        // ----- Логика обновления движения -----
+        let lastFrameTime = 0;
+        function updateGame(deltaTime) {
+            if(!gameActive) return;
+            let moveSpeed = 3.2 * deltaTime;
+            let rotSpeed = 2.5 * deltaTime;
+            if(keys.ArrowUp) {
+                let moveX = Math.cos(player.angle) * moveSpeed;
+                let moveY = Math.sin(player.angle) * moveSpeed;
+                tryMove(moveX, moveY);
+            }
+            if(keys.ArrowDown) {
+                let moveX = -Math.cos(player.angle) * moveSpeed;
+                let moveY = -Math.sin(player.angle) * moveSpeed;
+                tryMove(moveX, moveY);
+            }
+            if(keys.ArrowLeft) {
+                player.angle -= rotSpeed;
+                if(player.angle < 0) player.angle += Math.PI*2;
+            }
+            if(keys.ArrowRight) {
+                player.angle += rotSpeed;
+                if(player.angle >= Math.PI*2) player.angle -= Math.PI*2;
+            }
+            
+            if(shootCooldown > 0) shootCooldown -= deltaTime;
+            if(invincibilityTimer > 0) invincibilityTimer -= deltaTime;
+            if(muzzleFlash > 0) muzzleFlash -= deltaTime;
+            
+            updateEnemies(deltaTime);
+        }
+        
+        // главный цикл рендера
+        let animationId;
+        function gameLoop(nowMs) {
+            if(!lastFrameTime) lastFrameTime = nowMs;
+            let delta = Math.min(0.033, (nowMs - lastFrameTime) / 1000);
+            if(delta <= 0) { lastFrameTime = nowMs; requestAnimationFrame(gameLoop); return; }
+            lastFrameTime = nowMs;
+            updateGame(delta);
+            // рендеринг
+            renderFloorCeil();
+            renderWalls();
+            renderSprites();
+            renderHUD();
+            if(muzzleFlash > 0.01) {
+                ctx.fillStyle = "rgba(255,200,100,0.25)";
+                ctx.fillRect(0,0,width,height);
+            }
+            if(invincibilityTimer > 0 && (Math.floor(Date.now()*0.02)%2===0)) {
+                ctx.fillStyle = "rgba(200,30,30,0.2)";
+                ctx.fillRect(0,0,width,height);
+            }
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // --- Обработка клавиш ---
+        window.addEventListener('keydown', (e) => {
+            const key = e.key;
+            if(keys.hasOwnProperty(key)) {
+                keys[key] = true;
+                e.preventDefault();
+            }
+            if(key === ' ' || key === 'Control') {
+                e.preventDefault();
+                if(gameActive) shoot();
+            }
+            if(key === 'r' || key === 'R') {
+                e.preventDefault();
+                restartGame();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            const key = e.key;
+            if(keys.hasOwnProperty(key)) keys[key] = false;
+        });
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            restartGame();
+        });
+        
+        // блокировка контекстного меню на canvas
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        canvas.addEventListener('mousedown', (e) => {
+            if(e.button === 0 && gameActive) shoot();
+            e.preventDefault();
+        });
+        
+        // начальная инициализация
+        updateHealthUI();
+        updateScoreUI();
+        restartGame(); // стартовый сброс
+        gameLoop(0);
+    })();
+</script>
+</body>
+</html>
